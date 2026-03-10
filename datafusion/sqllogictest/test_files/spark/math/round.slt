@@ -21,6 +21,17 @@
 # For more information, please see:
 #   https://github.com/apache/datafusion/issues/15914
 
+# Tests for Spark-compatible round function.
+# Spark semantics differ from DataFusion's built-in round in two ways:
+#   1. Integer rounding: Spark rounds integer types in-place (preserving the type) when d < 0,
+#      with overflow checking in ANSI mode; DataFusion coerces integers to Float64
+#   2. Decimal precision: Spark adjusts Decimal128 precision/scale based on d;
+#      DataFusion preserves the original precision and scale
+#
+# Example: SELECT round(1250::BIGINT, -2)
+#   Spark:      returns BIGINT value 1300
+#   DataFusion: returns DOUBLE value 1300.0
+
 ## Original Query: SELECT round(2.5, 0);
 ## PySpark 3.5.5 Result: {'round(2.5, 0)': Decimal('3'), 'typeof(round(2.5, 0))': 'decimal(2,0)', 'typeof(2.5)': 'decimal(2,1)', 'typeof(0)': 'int'}
 query R
