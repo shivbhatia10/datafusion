@@ -19,6 +19,14 @@
 # For more information, please see:
 #   https://github.com/apache/datafusion/issues/15914
 
+# Tests for Spark-compatible isnan function.
+# Spark semantics differ from DataFusion's built-in isnan:
+#   Spark returns false for NULL inputs; DataFusion returns NULL.
+#
+# Example: SELECT isnan(NULL::DOUBLE)
+#   Spark:      returns false
+#   DataFusion: returns NULL
+
 # Scalar input: float64
 query BBBBB
 SELECT isnan(1.0::DOUBLE), isnan('NaN'::DOUBLE), isnan('inf'::DOUBLE), isnan(0.0::DOUBLE), isnan(-1.0::DOUBLE);
