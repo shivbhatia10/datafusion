@@ -21,6 +21,17 @@
 # For more information, please see:
 #   https://github.com/apache/datafusion/issues/15914
 
+# Tests for Spark-compatible floor function.
+# Spark semantics differ from DataFusion's built-in floor in two ways:
+#   1. Return type: Spark returns Int64 for float/integer inputs;
+#      DataFusion returns the same float type (e.g. floor(1.5::DOUBLE) -> DOUBLE in DF, BIGINT in Spark)
+#   2. Decimal precision: Spark adjusts precision to (p - s + 1) for Decimal128(p, s) with scale > 0;
+#      DataFusion preserves the original precision and scale
+#
+# Example: SELECT floor(1.50::DECIMAL(10,2))
+#   Spark:      returns Decimal(9, 0) value 1
+#   DataFusion: returns Decimal(10, 2) value 1.00
+
 ## Original Query: SELECT floor(-0.1);
 ## PySpark 3.5.5 Result: {'FLOOR(-0.1)': Decimal('-1'), 'typeof(FLOOR(-0.1))': 'decimal(1,0)', 'typeof(-0.1)': 'decimal(1,1)'}
 query R
