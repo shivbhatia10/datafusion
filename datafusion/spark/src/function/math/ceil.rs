@@ -86,8 +86,7 @@ impl ScalarUDFImpl for SparkCeil {
     }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
-        let return_type = args.return_type().clone();
-        spark_ceil(&args.args, &return_type)
+        spark_ceil(&args.args)
     }
 
     fn aliases(&self) -> &[String] {
@@ -95,7 +94,7 @@ impl ScalarUDFImpl for SparkCeil {
     }
 }
 
-fn spark_ceil(args: &[ColumnarValue], return_type: &DataType) -> Result<ColumnarValue> {
+fn spark_ceil(args: &[ColumnarValue]) -> Result<ColumnarValue> {
     let input = match take_function_args("ceil", args)? {
         [ColumnarValue::Scalar(value)] => value.to_array()?,
         [ColumnarValue::Array(arr)] => Arc::clone(arr),
@@ -113,15 +112,16 @@ fn spark_ceil(args: &[ColumnarValue], return_type: &DataType) -> Result<Columnar
                 .unary::<_, Int64Type>(|x| x.ceil() as i64),
         ) as _,
         dt if dt.is_integer() => input,
-        DataType::Decimal128(_, s) if *s > 0 => {
+        DataType::Decimal128(p, s) if *s > 0 => {
             let div = 10_i128.pow(*s as u32);
+            let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
             let result: Decimal128Array =
                 input.as_primitive::<Decimal128Type>().unary(|x| {
                     let d = x / div;
                     let r = x % div;
                     if r > 0 { d + 1 } else { d }
                 });
-            Arc::new(result.with_data_type(return_type.clone()))
+            Arc::new(result.with_data_type(DataType::Decimal128(new_p, 0)))
         }
         DataType::Decimal128(_, _) => input,
         other => return exec_err!("Unsupported data type {other:?} for function ceil"),
@@ -148,7 +148,7 @@ mod tests {
             None,
         ]);
         let args = vec![ColumnarValue::Array(Arc::new(input))];
-        let result = spark_ceil(&args, &DataType::Int64).unwrap();
+        let result = spark_ceil(&args).unwrap();
         let result = match result {
             ColumnarValue::Array(arr) => arr,
             _ => panic!("Expected array"),
@@ -180,7 +180,7 @@ mod tests {
             None,
         ]);
         let args = vec![ColumnarValue::Array(Arc::new(input))];
-        let result = spark_ceil(&args, &DataType::Int64).unwrap();
+        let result = spark_ceil(&args).unwrap();
         let result = match result {
             ColumnarValue::Array(arr) => arr,
             _ => panic!("Expected array"),
@@ -204,7 +204,7 @@ mod tests {
     fn test_ceil_int64() {
         let input = Int64Array::from(vec![Some(1), Some(-1), None]);
         let args = vec![ColumnarValue::Array(Arc::new(input))];
-        let result = spark_ceil(&args, &DataType::Int64).unwrap();
+        let result = spark_ceil(&args).unwrap();
         let result = match result {
             ColumnarValue::Array(arr) => arr,
             _ => panic!("Expected array"),
@@ -220,7 +220,7 @@ mod tests {
         let input = Decimal128Array::from(vec![Some(150), Some(-150), Some(100), None])
             .with_data_type(DataType::Decimal128(10, 2));
         let args = vec![ColumnarValue::Array(Arc::new(input))];
-        let result = spark_ceil(&args, &return_type).unwrap();
+        let result = spark_ceil(&args).unwrap();
         let result = match result {
             ColumnarValue::Array(arr) => arr,
             _ => panic!("Expected array"),
@@ -235,7 +235,7 @@ mod tests {
     fn test_ceil_float64_scalar() {
         let input = ScalarValue::Float64(Some(-1.1));
         let args = vec![ColumnarValue::Scalar(input)];
-        let result = spark_ceil(&args, &DataType::Int64).unwrap();
+        let result = spark_ceil(&args).unwrap();
         let result = match result {
             ColumnarValue::Array(arr) => arr,
             _ => panic!("Expected array"),
@@ -248,7 +248,7 @@ mod tests {
     fn test_ceil_float32_scalar() {
         let input = ScalarValue::Float32(Some(125.2345f32));
         let args = vec![ColumnarValue::Scalar(input)];
-        let result = spark_ceil(&args, &DataType::Int64).unwrap();
+        let result = spark_ceil(&args).unwrap();
         let result = match result {
             ColumnarValue::Array(arr) => arr,
             _ => panic!("Expected array"),
@@ -261,7 +261,7 @@ mod tests {
     fn test_ceil_int64_scalar() {
         let input = ScalarValue::Int64(Some(48));
         let args = vec![ColumnarValue::Scalar(input)];
-        let result = spark_ceil(&args, &DataType::Int64).unwrap();
+        let result = spark_ceil(&args).unwrap();
         let result = match result {
             ColumnarValue::Array(arr) => arr,
             _ => panic!("Expected array"),
