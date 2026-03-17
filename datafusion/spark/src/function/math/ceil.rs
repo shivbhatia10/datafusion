@@ -81,7 +81,8 @@ impl ScalarUDFImpl for SparkCeil {
                 }
             }
             dt if dt.is_integer() => Ok(dt.clone()),
-            _ => Ok(DataType::Int64),
+            DataType::Float32 | DataType::Float64 => Ok(DataType::Int64),
+            other => exec_err!("Unsupported data type {other:?} for function ceil"),
         }
     }
 
