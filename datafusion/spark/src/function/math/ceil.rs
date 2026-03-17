@@ -73,11 +73,14 @@ impl ScalarUDFImpl for SparkCeil {
 
     fn return_type(&self, arg_types: &[DataType]) -> Result<DataType> {
         match &arg_types[0] {
-            DataType::Decimal128(p, s) if *s > 0 => {
-                let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
-                Ok(DataType::Decimal128(new_p, 0))
+            DataType::Decimal128(p, s) => {
+                if *s > 0 {
+                    let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
+                    Ok(DataType::Decimal128(new_p, 0))
+                } else {
+                    Ok(DataType::Decimal128(*p, *s))
+                }
             }
-            DataType::Decimal128(p, s) => Ok(DataType::Decimal128(*p, *s)),
             _ => Ok(DataType::Int64),
         }
     }
