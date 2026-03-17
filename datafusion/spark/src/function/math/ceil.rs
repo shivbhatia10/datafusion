@@ -18,7 +18,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::array::{AsArray, Decimal128Array};
+use arrow::array::{ArrowNativeTypeOp, AsArray, Decimal128Array};
 use arrow::datatypes::{DataType, Decimal128Type, Float32Type, Float64Type, Int64Type};
 use datafusion_common::utils::take_function_args;
 use datafusion_common::{Result, ScalarValue, exec_err};
@@ -108,7 +108,7 @@ fn spark_ceil_scalar(value: &ScalarValue) -> Result<ColumnarValue> {
         ScalarValue::Float64(v) => ScalarValue::Int64(v.map(|x| x.ceil() as i64)),
         v if v.data_type().is_integer() => v.clone(),
         ScalarValue::Decimal128(v, p, s) if *s > 0 => {
-            let div = 10_i128.pow(*s as u32);
+            let div = 10_i128.pow_wrapping(*s as u32);
             let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
             let result = v.map(|x| {
                 let d = x / div;
@@ -142,7 +142,7 @@ fn spark_ceil_array(input: &Arc<dyn arrow::array::Array>) -> Result<ColumnarValu
         ) as _,
         dt if dt.is_integer() => Arc::clone(input),
         DataType::Decimal128(p, s) if *s > 0 => {
-            let div = 10_i128.pow(*s as u32);
+            let div = 10_i128.pow_wrapping(*s as u32);
             let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
             let result: Decimal128Array =
                 input.as_primitive::<Decimal128Type>().unary(|x| {
