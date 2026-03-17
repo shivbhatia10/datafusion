@@ -75,6 +75,8 @@ impl ScalarUDFImpl for SparkCeil {
                     let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
                     Ok(DataType::Decimal128(new_p, 0))
                 } else {
+                    // scale <= 0 means the value is already a whole number
+                    // (or represents multiples of 10^(-scale)), so ceil is a no-op
                     Ok(DataType::Decimal128(*p, *s))
                 }
             }
