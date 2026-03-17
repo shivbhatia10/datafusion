@@ -19,7 +19,6 @@ use std::any::Any;
 use std::sync::Arc;
 
 use arrow::array::{AsArray, Decimal128Array};
-use arrow::compute::cast;
 use arrow::datatypes::{DataType, Decimal128Type, Float32Type, Float64Type, Int64Type};
 use datafusion_common::utils::take_function_args;
 use datafusion_common::{Result, exec_err};
@@ -31,8 +30,8 @@ use datafusion_expr::{
 /// <https://spark.apache.org/docs/latest/api/sql/index.html#ceil>
 ///
 /// Differences with DataFusion ceil:
-///  - Spark's ceil returns Int64 for float and integer inputs; DataFusion preserves
-///    the input type (Float32→Float32, Float64→Float64, integers coerced to Float64)
+///  - Spark's ceil returns Int64 for float inputs; DataFusion preserves
+///    the input type (Float32→Float32, Float64→Float64)
 ///  - Spark's ceil on Decimal128(p, s) returns Decimal128(p−s+1, 0), reducing scale
 ///    to 0; DataFusion preserves the original precision and scale
 ///  - Spark only supports Decimal128; DataFusion also supports Decimal32/64/256
@@ -81,6 +80,7 @@ impl ScalarUDFImpl for SparkCeil {
                     Ok(DataType::Decimal128(*p, *s))
                 }
             }
+            dt if dt.is_integer() => Ok(dt.clone()),
             _ => Ok(DataType::Int64),
         }
     }
@@ -112,7 +112,7 @@ fn spark_ceil(args: &[ColumnarValue], return_type: &DataType) -> Result<Columnar
                 .as_primitive::<Float64Type>()
                 .unary::<_, Int64Type>(|x| x.ceil() as i64),
         ) as _,
-        dt if dt.is_integer() => cast(&input, &DataType::Int64)?,
+        dt if dt.is_integer() => input,
         DataType::Decimal128(_, s) if *s > 0 => {
             let div = 10_i128.pow(*s as u32);
             let result: Decimal128Array =
