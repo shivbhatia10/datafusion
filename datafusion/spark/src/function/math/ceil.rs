@@ -39,7 +39,6 @@ use datafusion_expr::{
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SparkCeil {
     signature: Signature,
-    aliases: Vec<String>,
 }
 
 impl Default for SparkCeil {
@@ -52,7 +51,6 @@ impl SparkCeil {
     pub fn new() -> Self {
         Self {
             signature: Signature::numeric(1, Volatility::Immutable),
-            aliases: vec!["ceiling".to_string()],
         }
     }
 }
@@ -87,10 +85,6 @@ impl ScalarUDFImpl for SparkCeil {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         spark_ceil(&args.args)
-    }
-
-    fn aliases(&self) -> &[String] {
-        &self.aliases
     }
 }
 
