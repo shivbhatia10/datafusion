@@ -1405,11 +1405,22 @@ impl ExecutionPlan for SortExec {
         config: &datafusion_common::config::ConfigOptions,
     ) -> Result<FilterDescription> {
         if phase != FilterPushdownPhase::Post {
+            if self.fetch.is_some() {
+                return Ok(FilterDescription::all_unsupported(
+                    &parent_filters,
+                    &self.children(),
+                ));
+            }
             return FilterDescription::from_children(parent_filters, &self.children());
         }
 
-        let mut child =
-            ChildFilterDescription::from_child(&parent_filters, self.input())?;
+        // In Post phase: block parent filters when fetch is set,
+        // but still push the TopK dynamic filter (self-filter).
+        let mut child = if self.fetch.is_some() {
+            ChildFilterDescription::all_unsupported(&parent_filters)
+        } else {
+            ChildFilterDescription::from_child(&parent_filters, self.input())?
+        };
 
         if let Some(filter) = &self.filter
             && config.optimizer.enable_topk_dynamic_filter_pushdown
@@ -1430,8 +1441,10 @@ mod tests {
     use super::*;
     use crate::coalesce_partitions::CoalescePartitionsExec;
     use crate::collect;
+    use crate::empty::EmptyExec;
     use crate::execution_plan::Boundedness;
     use crate::expressions::col;
+    use crate::filter_pushdown::{FilterPushdownPhase, PushedDown};
     use crate::test;
     use crate::test::TestMemoryExec;
     use crate::test::exec::{BlockingExec, assert_strong_count_converges_to_zero};
@@ -1441,15 +1454,19 @@ mod tests {
     use arrow::compute::SortOptions;
     use arrow::datatypes::*;
     use datafusion_common::cast::as_primitive_array;
+    use datafusion_common::config::ConfigOptions;
     use datafusion_common::test_util::batches_to_string;
     use datafusion_common::{DataFusionError, Result, ScalarValue};
     use datafusion_execution::RecordBatchStream;
     use datafusion_execution::config::SessionConfig;
+    use datafusion_execution::memory_pool::{
+        GreedyMemoryPool, MemoryConsumer, MemoryPool,
+    };
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
     use datafusion_physical_expr::EquivalenceProperties;
     use datafusion_physical_expr::expressions::{Column, Literal};
 
-    use futures::{FutureExt, Stream};
+    use futures::{FutureExt, Stream, TryStreamExt};
     use insta::assert_snapshot;
 
     #[derive(Debug, Clone)]
@@ -2748,11 +2765,6 @@ mod tests {
     /// those bytes become unaccounted-for reserved memory that nobody uses.
     #[tokio::test]
     async fn test_sort_merge_reservation_transferred_not_freed() -> Result<()> {
-        use datafusion_execution::memory_pool::{
-            GreedyMemoryPool, MemoryConsumer, MemoryPool,
-        };
-        use futures::TryStreamExt;
-
         let sort_spill_reservation_bytes: usize = 10 * 1024; // 10 KB
 
         // Pool: merge reservation (10KB) + enough room for sort to work.
@@ -2861,6 +2873,113 @@ mod tests {
         }
 
         drop(contender);
+        Ok(())
+    }
+
+    #[test]
+    fn test_sort_with_fetch_blocks_filter_pushdown() -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int32, false)]));
+        let input = Arc::new(EmptyExec::new(Arc::clone(&schema)));
+        let sort = SortExec::new(
+            [PhysicalSortExpr::new_default(Arc::new(Column::new("a", 0)))].into(),
+            input,
+        )
+        .with_fetch(Some(10));
+
+        let parent_filter: Arc<dyn PhysicalExpr> = Arc::new(Column::new("a", 0));
+        let config = ConfigOptions::new();
+
+        let desc = sort.gather_filters_for_pushdown(
+            FilterPushdownPhase::Pre,
+            vec![parent_filter],
+            &config,
+        )?;
+
+        // Parent filter must be unsupported — it must not be pushed below
+        // a sort with fetch (TopK).
+        let parent_filters = desc.parent_filters();
+        assert_eq!(parent_filters.len(), 1);
+        assert_eq!(parent_filters[0].len(), 1);
+        assert!(
+            matches!(parent_filters[0][0].discriminant, PushedDown::No),
+            "Parent filter should be unsupported when sort has fetch"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sort_without_fetch_allows_filter_pushdown() -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int32, false)]));
+        let input = Arc::new(EmptyExec::new(Arc::clone(&schema)));
+        let sort = SortExec::new(
+            [PhysicalSortExpr::new_default(Arc::new(Column::new("a", 0)))].into(),
+            input,
+        );
+
+        let parent_filter: Arc<dyn PhysicalExpr> = Arc::new(Column::new("a", 0));
+        let config = ConfigOptions::new();
+
+        let desc = sort.gather_filters_for_pushdown(
+            FilterPushdownPhase::Pre,
+            vec![parent_filter],
+            &config,
+        )?;
+
+        // Parent filter should be supported — plain sort (no fetch) is
+        // filter-commutative.
+        let parent_filters = desc.parent_filters();
+        assert_eq!(parent_filters.len(), 1);
+        assert_eq!(parent_filters[0].len(), 1);
+        assert!(
+            matches!(parent_filters[0][0].discriminant, PushedDown::Yes),
+            "Parent filter should be supported when sort has no fetch"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sort_with_fetch_allows_topk_self_filter_in_post_phase() -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int32, false)]));
+        let input = Arc::new(EmptyExec::new(Arc::clone(&schema)));
+        let sort = SortExec::new(
+            [PhysicalSortExpr::new_default(Arc::new(Column::new("a", 0)))].into(),
+            input,
+        )
+        .with_fetch(Some(10));
+
+        // with_fetch(Some(_)) creates the TopK dynamic filter automatically.
+        assert!(sort.filter.is_some(), "TopK filter should be created");
+
+        let parent_filter: Arc<dyn PhysicalExpr> = Arc::new(Column::new("a", 0));
+        let mut config = ConfigOptions::new();
+        config.optimizer.enable_topk_dynamic_filter_pushdown = true;
+
+        let desc = sort.gather_filters_for_pushdown(
+            FilterPushdownPhase::Post,
+            vec![parent_filter],
+            &config,
+        )?;
+
+        // Parent filters should be blocked in Post phase when fetch is set.
+        let parent_filters = desc.parent_filters();
+        assert_eq!(parent_filters.len(), 1);
+        assert_eq!(parent_filters[0].len(), 1);
+        assert!(
+            matches!(parent_filters[0][0].discriminant, PushedDown::No),
+            "Parent filter should be unsupported in Post phase when sort has fetch"
+        );
+
+        // The TopK self-filter should still be allowed through.
+        let self_filters = desc.self_filters();
+        assert_eq!(self_filters.len(), 1);
+        assert_eq!(
+            self_filters[0].len(),
+            1,
+            "TopK dynamic self-filter should be pushed down"
+        );
+
         Ok(())
     }
 }

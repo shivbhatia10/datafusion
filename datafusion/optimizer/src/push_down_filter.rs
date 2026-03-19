@@ -832,6 +832,13 @@ impl OptimizerRule for PushDownFilter {
                 insert_below(LogicalPlan::Distinct(distinct), new_filter)
             }
             LogicalPlan::Sort(sort) => {
+                // If the sort has a fetch (limit), pushing a filter below
+                // it would change semantics: the limit should apply before
+                // the filter, not after.
+                if sort.fetch.is_some() {
+                    filter.input = Arc::new(LogicalPlan::Sort(sort));
+                    return Ok(Transformed::no(LogicalPlan::Filter(filter)));
+                }
                 let new_filter =
                     Filter::try_new(filter.predicate, Arc::clone(&sort.input))
                         .map(LogicalPlan::Filter)?;
@@ -1130,6 +1137,13 @@ impl OptimizerRule for PushDownFilter {
             }
             LogicalPlan::Join(join) => push_down_join(join, Some(&filter.predicate)),
             LogicalPlan::TableScan(scan) => {
+                // If the scan has a fetch (limit), pushing filters into it
+                // would change semantics: the limit should apply before the
+                // filter, not after.
+                if scan.fetch.is_some() {
+                    filter.input = Arc::new(LogicalPlan::TableScan(scan));
+                    return Ok(Transformed::no(LogicalPlan::Filter(filter)));
+                }
                 let filter_predicates = split_conjunction(&filter.predicate);
 
                 let (volatile_filters, non_volatile_filters): (Vec<&Expr>, Vec<&Expr>) =
@@ -4312,6 +4326,65 @@ mod tests {
         Filter: val > Int64(150)
           Projection: leaf_udf(test.a) AS val, test.b, test.c
             TableScan: test, full_filters=[test.b > Int64(5)]
+        "
+        )
+    }
+
+    #[test]
+    fn filter_not_pushed_down_through_table_scan_with_fetch() -> Result<()> {
+        let scan = test_table_scan()?;
+        let scan_with_fetch = match scan {
+            LogicalPlan::TableScan(scan) => LogicalPlan::TableScan(TableScan {
+                fetch: Some(10),
+                ..scan
+            }),
+            _ => unreachable!(),
+        };
+        let plan = LogicalPlanBuilder::from(scan_with_fetch)
+            .filter(col("a").gt(lit(10i64)))?
+            .build()?;
+        // Filter must NOT be pushed into the table scan when it has a fetch (limit)
+        assert_optimized_plan_equal!(
+            plan,
+            @r"
+        Filter: test.a > Int64(10)
+          TableScan: test, fetch=10
+        "
+        )
+    }
+
+    #[test]
+    fn filter_push_down_through_sort_without_fetch() -> Result<()> {
+        let table_scan = test_table_scan()?;
+        let plan = LogicalPlanBuilder::from(table_scan)
+            .sort(vec![col("a").sort(true, true)])?
+            .filter(col("a").gt(lit(10i64)))?
+            .build()?;
+        // Filter should be pushed below the sort
+        assert_optimized_plan_equal!(
+            plan,
+            @r"
+        Sort: test.a ASC NULLS FIRST
+          TableScan: test, full_filters=[test.a > Int64(10)]
+        "
+        )
+    }
+
+    #[test]
+    fn filter_not_pushed_down_through_sort_with_fetch() -> Result<()> {
+        let table_scan = test_table_scan()?;
+        let plan = LogicalPlanBuilder::from(table_scan)
+            .sort_with_limit(vec![col("a").sort(true, true)], Some(5))?
+            .filter(col("a").gt(lit(10i64)))?
+            .build()?;
+        // Filter must NOT be pushed below the sort when it has a fetch (limit),
+        // because the limit should apply before the filter.
+        assert_optimized_plan_equal!(
+            plan,
+            @r"
+        Filter: test.a > Int64(10)
+          Sort: test.a ASC NULLS FIRST, fetch=5
+            TableScan: test
         "
         )
     }
