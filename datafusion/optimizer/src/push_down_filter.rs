@@ -796,6 +796,12 @@ impl OptimizerRule for PushDownFilter {
             filter.predicate = new_predicate;
         }
 
+        // If the child has a fetch (limit), pushing a filter below it would
+        // change semantics: the limit should apply before the filter, not after.
+        if filter.input.fetch().is_some() {
+            return Ok(Transformed::no(LogicalPlan::Filter(filter)));
+        }
+
         match Arc::unwrap_or_clone(filter.input) {
             LogicalPlan::Filter(child_filter) => {
                 let parents_predicates = split_conjunction_owned(filter.predicate);
@@ -832,13 +838,6 @@ impl OptimizerRule for PushDownFilter {
                 insert_below(LogicalPlan::Distinct(distinct), new_filter)
             }
             LogicalPlan::Sort(sort) => {
-                // If the sort has a fetch (limit), pushing a filter below
-                // it would change semantics: the limit should apply before
-                // the filter, not after.
-                if sort.fetch.is_some() {
-                    filter.input = Arc::new(LogicalPlan::Sort(sort));
-                    return Ok(Transformed::no(LogicalPlan::Filter(filter)));
-                }
                 let new_filter =
                     Filter::try_new(filter.predicate, Arc::clone(&sort.input))
                         .map(LogicalPlan::Filter)?;
@@ -1137,13 +1136,6 @@ impl OptimizerRule for PushDownFilter {
             }
             LogicalPlan::Join(join) => push_down_join(join, Some(&filter.predicate)),
             LogicalPlan::TableScan(scan) => {
-                // If the scan has a fetch (limit), pushing filters into it
-                // would change semantics: the limit should apply before the
-                // filter, not after.
-                if scan.fetch.is_some() {
-                    filter.input = Arc::new(LogicalPlan::TableScan(scan));
-                    return Ok(Transformed::no(LogicalPlan::Filter(filter)));
-                }
                 let filter_predicates = split_conjunction(&filter.predicate);
 
                 let (volatile_filters, non_volatile_filters): (Vec<&Expr>, Vec<&Expr>) =

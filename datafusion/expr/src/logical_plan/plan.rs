@@ -1392,6 +1392,40 @@ impl LogicalPlan {
         }
     }
 
+    /// Returns the fetch (limit) of this plan node, if it has one.
+    ///
+    /// Only [`LogicalPlan::Sort`] and [`LogicalPlan::TableScan`] carry a fetch
+    /// value directly; all other variants return `None`.
+    pub fn fetch(&self) -> Option<usize> {
+        match self {
+            LogicalPlan::Sort(Sort { fetch, .. }) => *fetch,
+            LogicalPlan::TableScan(TableScan { fetch, .. }) => *fetch,
+            LogicalPlan::Projection(_) => None,
+            LogicalPlan::Filter(_) => None,
+            LogicalPlan::Window(_) => None,
+            LogicalPlan::Aggregate(_) => None,
+            LogicalPlan::Join(_) => None,
+            LogicalPlan::Repartition(_) => None,
+            LogicalPlan::Union(_) => None,
+            LogicalPlan::EmptyRelation(_) => None,
+            LogicalPlan::Subquery(_) => None,
+            LogicalPlan::SubqueryAlias(_) => None,
+            LogicalPlan::Limit(_) => None,
+            LogicalPlan::Statement(_) => None,
+            LogicalPlan::Values(_) => None,
+            LogicalPlan::Explain(_) => None,
+            LogicalPlan::Analyze(_) => None,
+            LogicalPlan::Extension(_) => None,
+            LogicalPlan::Distinct(_) => None,
+            LogicalPlan::Dml(_) => None,
+            LogicalPlan::Ddl(_) => None,
+            LogicalPlan::Copy(_) => None,
+            LogicalPlan::DescribeTable(_) => None,
+            LogicalPlan::Unnest(_) => None,
+            LogicalPlan::RecursiveQuery(_) => None,
+        }
+    }
+
     /// If this node's expressions contains any references to an outer subquery
     pub fn contains_outer_reference(&self) -> bool {
         let mut contains = false;
