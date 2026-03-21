@@ -1392,37 +1392,79 @@ impl LogicalPlan {
         }
     }
 
+    /// Returns the skip (offset) of this plan node, if it has one.
+    ///
+    /// Only [`LogicalPlan::Limit`] carries a skip value; all other variants
+    /// return `Ok(None)`. Returns `Ok(None)` for a zero skip.
+    pub fn skip(&self) -> Result<Option<usize>> {
+        match self {
+            LogicalPlan::Limit(limit) => match limit.get_skip_type()? {
+                SkipType::Literal(0) => Ok(None),
+                SkipType::Literal(n) => Ok(Some(n)),
+                SkipType::UnsupportedExpr => Ok(None),
+            },
+            LogicalPlan::Sort(_) => Ok(None),
+            LogicalPlan::TableScan(_) => Ok(None),
+            LogicalPlan::Projection(_) => Ok(None),
+            LogicalPlan::Filter(_) => Ok(None),
+            LogicalPlan::Window(_) => Ok(None),
+            LogicalPlan::Aggregate(_) => Ok(None),
+            LogicalPlan::Join(_) => Ok(None),
+            LogicalPlan::Repartition(_) => Ok(None),
+            LogicalPlan::Union(_) => Ok(None),
+            LogicalPlan::EmptyRelation(_) => Ok(None),
+            LogicalPlan::Subquery(_) => Ok(None),
+            LogicalPlan::SubqueryAlias(_) => Ok(None),
+            LogicalPlan::Statement(_) => Ok(None),
+            LogicalPlan::Values(_) => Ok(None),
+            LogicalPlan::Explain(_) => Ok(None),
+            LogicalPlan::Analyze(_) => Ok(None),
+            LogicalPlan::Extension(_) => Ok(None),
+            LogicalPlan::Distinct(_) => Ok(None),
+            LogicalPlan::Dml(_) => Ok(None),
+            LogicalPlan::Ddl(_) => Ok(None),
+            LogicalPlan::Copy(_) => Ok(None),
+            LogicalPlan::DescribeTable(_) => Ok(None),
+            LogicalPlan::Unnest(_) => Ok(None),
+            LogicalPlan::RecursiveQuery(_) => Ok(None),
+        }
+    }
+
     /// Returns the fetch (limit) of this plan node, if it has one.
     ///
-    /// Only [`LogicalPlan::Sort`] and [`LogicalPlan::TableScan`] carry a fetch
-    /// value directly; all other variants return `None`.
-    pub fn fetch(&self) -> Option<usize> {
+    /// [`LogicalPlan::Sort`], [`LogicalPlan::TableScan`], and
+    /// [`LogicalPlan::Limit`] may carry a fetch value; all other variants
+    /// return `Ok(None)`.
+    pub fn fetch(&self) -> Result<Option<usize>> {
         match self {
-            LogicalPlan::Sort(Sort { fetch, .. }) => *fetch,
-            LogicalPlan::TableScan(TableScan { fetch, .. }) => *fetch,
-            LogicalPlan::Projection(_) => None,
-            LogicalPlan::Filter(_) => None,
-            LogicalPlan::Window(_) => None,
-            LogicalPlan::Aggregate(_) => None,
-            LogicalPlan::Join(_) => None,
-            LogicalPlan::Repartition(_) => None,
-            LogicalPlan::Union(_) => None,
-            LogicalPlan::EmptyRelation(_) => None,
-            LogicalPlan::Subquery(_) => None,
-            LogicalPlan::SubqueryAlias(_) => None,
-            LogicalPlan::Limit(_) => None,
-            LogicalPlan::Statement(_) => None,
-            LogicalPlan::Values(_) => None,
-            LogicalPlan::Explain(_) => None,
-            LogicalPlan::Analyze(_) => None,
-            LogicalPlan::Extension(_) => None,
-            LogicalPlan::Distinct(_) => None,
-            LogicalPlan::Dml(_) => None,
-            LogicalPlan::Ddl(_) => None,
-            LogicalPlan::Copy(_) => None,
-            LogicalPlan::DescribeTable(_) => None,
-            LogicalPlan::Unnest(_) => None,
-            LogicalPlan::RecursiveQuery(_) => None,
+            LogicalPlan::Sort(Sort { fetch, .. }) => Ok(*fetch),
+            LogicalPlan::TableScan(TableScan { fetch, .. }) => Ok(*fetch),
+            LogicalPlan::Limit(limit) => match limit.get_fetch_type()? {
+                FetchType::Literal(s) => Ok(s),
+                FetchType::UnsupportedExpr => Ok(None),
+            },
+            LogicalPlan::Projection(_) => Ok(None),
+            LogicalPlan::Filter(_) => Ok(None),
+            LogicalPlan::Window(_) => Ok(None),
+            LogicalPlan::Aggregate(_) => Ok(None),
+            LogicalPlan::Join(_) => Ok(None),
+            LogicalPlan::Repartition(_) => Ok(None),
+            LogicalPlan::Union(_) => Ok(None),
+            LogicalPlan::EmptyRelation(_) => Ok(None),
+            LogicalPlan::Subquery(_) => Ok(None),
+            LogicalPlan::SubqueryAlias(_) => Ok(None),
+            LogicalPlan::Statement(_) => Ok(None),
+            LogicalPlan::Values(_) => Ok(None),
+            LogicalPlan::Explain(_) => Ok(None),
+            LogicalPlan::Analyze(_) => Ok(None),
+            LogicalPlan::Extension(_) => Ok(None),
+            LogicalPlan::Distinct(_) => Ok(None),
+            LogicalPlan::Dml(_) => Ok(None),
+            LogicalPlan::Ddl(_) => Ok(None),
+            LogicalPlan::Copy(_) => Ok(None),
+            LogicalPlan::DescribeTable(_) => Ok(None),
+            LogicalPlan::Unnest(_) => Ok(None),
+            LogicalPlan::RecursiveQuery(_) => Ok(None),
         }
     }
 

@@ -796,9 +796,10 @@ impl OptimizerRule for PushDownFilter {
             filter.predicate = new_predicate;
         }
 
-        // If the child has a fetch (limit), pushing a filter below it would
-        // change semantics: the limit should apply before the filter, not after.
-        if filter.input.fetch().is_some() {
+        // If the child has a fetch (limit) or skip (offset), pushing a filter
+        // below it would change semantics: the limit/offset should apply before
+        // the filter, not after.
+        if filter.input.fetch()?.is_some() || filter.input.skip()?.is_some() {
             return Ok(Transformed::no(LogicalPlan::Filter(filter)));
         }
 
