@@ -34,10 +34,10 @@
 
 ## Original Query: SELECT ceil(-0.1);
 ## PySpark 3.5.5 Result: {'CEIL(-0.1)': Decimal('0'), 'typeof(CEIL(-0.1))': 'decimal(1,0)', 'typeof(-0.1)': 'decimal(1,1)'}
-query R
-SELECT ceil(-0.1::decimal(1,1));
+query RT
+SELECT ceil(-0.1::decimal(1,1)), arrow_typeof(ceil(-0.1::decimal(1,1)));
 ----
-0
+0 Decimal128(1, 0)
 
 ## Original Query: SELECT ceil(3.1411, -3);
 ## PySpark 3.5.5 Result: {'ceil(3.1411, -3)': Decimal('1000'), 'typeof(ceil(3.1411, -3))': 'decimal(4,0)', 'typeof(3.1411)': 'decimal(5,4)', 'typeof(-3)': 'int'}
@@ -53,68 +53,68 @@ SELECT ceil(-0.1::decimal(1,1));
 
 ## Original Query: SELECT ceil(5);
 ## PySpark 3.5.5 Result: {'CEIL(5)': 5, 'typeof(CEIL(5))': 'bigint', 'typeof(5)': 'int'}
-query I
-SELECT ceil(5::int);
+query IT
+SELECT ceil(5::int), arrow_typeof(ceil(5::int));
 ----
-5
+5 Int64
 
 # Scalar input: float64 returns bigint
-query IIIIIII
-SELECT ceil(125.2345::DOUBLE), ceil(15.0001::DOUBLE), ceil(0.1::DOUBLE), ceil(-0.9::DOUBLE), ceil(-1.1::DOUBLE), ceil(123.0::DOUBLE), ceil(NULL::DOUBLE);
+query IIIIIIIT
+SELECT ceil(125.2345::DOUBLE), ceil(15.0001::DOUBLE), ceil(0.1::DOUBLE), ceil(-0.9::DOUBLE), ceil(-1.1::DOUBLE), ceil(123.0::DOUBLE), ceil(NULL::DOUBLE), arrow_typeof(ceil(125.2345::DOUBLE));
 ----
-126 16 1 0 -1 123 NULL
+126 16 1 0 -1 123 NULL Int64
 
 # Scalar input: float32 returns bigint
-query IIIIIII
-SELECT ceil(125.2345::FLOAT), ceil(15.0001::FLOAT), ceil(0.1::FLOAT), ceil(-0.9::FLOAT), ceil(-1.1::FLOAT), ceil(123.0::FLOAT), ceil(NULL::FLOAT);
+query IIIIIIIT
+SELECT ceil(125.2345::FLOAT), ceil(15.0001::FLOAT), ceil(0.1::FLOAT), ceil(-0.9::FLOAT), ceil(-1.1::FLOAT), ceil(123.0::FLOAT), ceil(NULL::FLOAT), arrow_typeof(ceil(125.2345::FLOAT));
 ----
-126 16 1 0 -1 123 NULL
+126 16 1 0 -1 123 NULL Int64
 
 # Scalar input: integer types all return bigint
-query III
-SELECT ceil(5::TINYINT), ceil(-3::TINYINT), ceil(NULL::TINYINT);
+query IIIT
+SELECT ceil(5::TINYINT), ceil(-3::TINYINT), ceil(NULL::TINYINT), arrow_typeof(ceil(5::TINYINT));
 ----
-5 -3 NULL
+5 -3 NULL Int64
 
-query III
-SELECT ceil(5::SMALLINT), ceil(-3::SMALLINT), ceil(NULL::SMALLINT);
+query IIIT
+SELECT ceil(5::SMALLINT), ceil(-3::SMALLINT), ceil(NULL::SMALLINT), arrow_typeof(ceil(5::SMALLINT));
 ----
-5 -3 NULL
+5 -3 NULL Int64
 
-query III
-SELECT ceil(5::INT), ceil(-3::INT), ceil(NULL::INT);
+query IIIT
+SELECT ceil(5::INT), ceil(-3::INT), ceil(NULL::INT), arrow_typeof(ceil(5::INT));
 ----
-5 -3 NULL
+5 -3 NULL Int64
 
-query III
-SELECT ceil(5::BIGINT), ceil(-3::BIGINT), ceil(NULL::BIGINT);
+query IIIT
+SELECT ceil(5::BIGINT), ceil(-3::BIGINT), ceil(NULL::BIGINT), arrow_typeof(ceil(5::BIGINT));
 ----
-5 -3 NULL
+5 -3 NULL Int64
 
 # Scalar input: decimal128 with scale > 0 returns decimal with scale 0
 # ceil(1.50) = 2, ceil(-1.50) = -1, ceil(1.00) = 1
-query RRR
-SELECT ceil(1.50::DECIMAL(10, 2)), ceil(-1.50::DECIMAL(10, 2)), ceil(1.00::DECIMAL(10, 2));
+query RRRT
+SELECT ceil(1.50::DECIMAL(10, 2)), ceil(-1.50::DECIMAL(10, 2)), ceil(1.00::DECIMAL(10, 2)), arrow_typeof(ceil(1.50::DECIMAL(10, 2)));
 ----
-2 -1 1
+2 -1 1 Decimal128(9, 0)
 
 # ceil(-0.1) = 0 (smallest positive decimal rounds up to 0 for negatives)
-query RR
-SELECT ceil(-0.1::DECIMAL(3, 1)), ceil(NULL::DECIMAL(10, 2));
+query RRT
+SELECT ceil(-0.1::DECIMAL(3, 1)), ceil(NULL::DECIMAL(10, 2)), arrow_typeof(ceil(-0.1::DECIMAL(3, 1)));
 ----
-0 NULL
+0 NULL Decimal128(3, 0)
 
 # ceil(3.1411) = 4
-query R
-SELECT ceil(3.1411::DECIMAL(5, 4));
+query RT
+SELECT ceil(3.1411::DECIMAL(5, 4)), arrow_typeof(ceil(3.1411::DECIMAL(5, 4)));
 ----
-4
+4 Decimal128(2, 0)
 
 # Scalar input: decimal128 with scale = 0 passes through unchanged
-query RRR
-SELECT ceil(5::DECIMAL(10, 0)), ceil(-3::DECIMAL(10, 0)), ceil(NULL::DECIMAL(10, 0));
+query RRRT
+SELECT ceil(5::DECIMAL(10, 0)), ceil(-3::DECIMAL(10, 0)), ceil(NULL::DECIMAL(10, 0)), arrow_typeof(ceil(5::DECIMAL(10, 0)));
 ----
-5 -3 NULL
+5 -3 NULL Decimal128(10, 0)
 
 # Array input: float64
 query I
