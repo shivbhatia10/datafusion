@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::array::{ArrowNativeTypeOp, AsArray, Decimal128Array};
@@ -58,10 +57,6 @@ impl SparkCeil {
 }
 
 impl ScalarUDFImpl for SparkCeil {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         "ceil"
     }
@@ -82,8 +77,8 @@ impl ScalarUDFImpl for SparkCeil {
                     Ok(DataType::Decimal128(*p, *s))
                 }
             }
-            dt if dt.is_integer() => Ok(dt.clone()),
             DataType::Float32 | DataType::Float64 => Ok(DataType::Int64),
+            dt if dt.is_integer() => Ok(DataType::Int64),
             other => exec_err!("Unsupported data type {other:?} for function ceil"),
         }
     }
@@ -106,7 +101,7 @@ fn spark_ceil_scalar(value: &ScalarValue) -> Result<ColumnarValue> {
     let result = match value {
         ScalarValue::Float32(v) => ScalarValue::Int64(v.map(|x| x.ceil() as i64)),
         ScalarValue::Float64(v) => ScalarValue::Int64(v.map(|x| x.ceil() as i64)),
-        v if v.data_type().is_integer() => v.clone(),
+        v if v.data_type().is_integer() => v.cast_to(&DataType::Int64)?,
         ScalarValue::Decimal128(v, p, s) if *s > 0 => {
             let div = 10_i128.pow_wrapping(*s as u32);
             let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
@@ -140,7 +135,7 @@ fn spark_ceil_array(input: &Arc<dyn arrow::array::Array>) -> Result<ColumnarValu
                 .as_primitive::<Float64Type>()
                 .unary::<_, Int64Type>(|x| x.ceil() as i64),
         ) as _,
-        dt if dt.is_integer() => Arc::clone(input),
+        dt if dt.is_integer() => arrow::compute::cast(input, &DataType::Int64)?,
         DataType::Decimal128(p, s) if *s > 0 => {
             let div = 10_i128.pow_wrapping(*s as u32);
             let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
