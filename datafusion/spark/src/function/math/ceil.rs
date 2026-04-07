@@ -69,8 +69,7 @@ impl ScalarUDFImpl for SparkCeil {
         match &arg_types[0] {
             DataType::Decimal128(p, s) => {
                 if *s > 0 {
-                    let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
-                    Ok(DataType::Decimal128(new_p, 0))
+                    Ok(DataType::Decimal128(decimal128_ceil_precision(*p, *s), 0))
                 } else {
                     // scale <= 0 means the value is already a whole number
                     // (or represents multiples of 10^(-scale)), so ceil is a no-op
@@ -97,20 +96,29 @@ fn spark_ceil(args: &[ColumnarValue]) -> Result<ColumnarValue> {
     }
 }
 
+/// Compute ceil for a single decimal128 value with the given scale.
+#[inline]
+fn decimal128_ceil(value: i128, scale: u32) -> i128 {
+    let div = 10_i128.pow_wrapping(scale);
+    let d = value / div;
+    let r = value % div;
+    if r > 0 { d + 1 } else { d }
+}
+
+/// Compute the return precision for a decimal128 ceil result.
+#[inline]
+fn decimal128_ceil_precision(precision: u8, scale: i8) -> u8 {
+    ((precision as i64) - (scale as i64) + 1).clamp(1, 38) as u8
+}
+
 fn spark_ceil_scalar(value: &ScalarValue) -> Result<ColumnarValue> {
     let result = match value {
         ScalarValue::Float32(v) => ScalarValue::Int64(v.map(|x| x.ceil() as i64)),
         ScalarValue::Float64(v) => ScalarValue::Int64(v.map(|x| x.ceil() as i64)),
         v if v.data_type().is_integer() => v.cast_to(&DataType::Int64)?,
         ScalarValue::Decimal128(v, p, s) if *s > 0 => {
-            let div = 10_i128.pow_wrapping(*s as u32);
-            let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
-            let result = v.map(|x| {
-                let d = x / div;
-                let r = x % div;
-                if r > 0 { d + 1 } else { d }
-            });
-            ScalarValue::Decimal128(result, new_p, 0)
+            let new_p = decimal128_ceil_precision(*p, *s);
+            ScalarValue::Decimal128(v.map(|x| decimal128_ceil(x, *s as u32)), new_p, 0)
         }
         ScalarValue::Decimal128(_, _, _) => value.clone(),
         other => {
@@ -137,14 +145,10 @@ fn spark_ceil_array(input: &Arc<dyn arrow::array::Array>) -> Result<ColumnarValu
         ) as _,
         dt if dt.is_integer() => arrow::compute::cast(input, &DataType::Int64)?,
         DataType::Decimal128(p, s) if *s > 0 => {
-            let div = 10_i128.pow_wrapping(*s as u32);
-            let new_p = ((*p as i64) - (*s as i64) + 1).clamp(1, 38) as u8;
-            let result: Decimal128Array =
-                input.as_primitive::<Decimal128Type>().unary(|x| {
-                    let d = x / div;
-                    let r = x % div;
-                    if r > 0 { d + 1 } else { d }
-                });
+            let new_p = decimal128_ceil_precision(*p, *s);
+            let result: Decimal128Array = input
+                .as_primitive::<Decimal128Type>()
+                .unary(|x| decimal128_ceil(x, *s as u32));
             Arc::new(result.with_data_type(DataType::Decimal128(new_p, 0)))
         }
         DataType::Decimal128(_, _) => Arc::clone(input),
