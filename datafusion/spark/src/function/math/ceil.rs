@@ -36,8 +36,8 @@ use datafusion_expr::{
 ///  - Spark only supports Decimal128; DataFusion also supports Decimal32/64/256
 ///  - Spark does not check for decimal overflow; DataFusion errors on overflow
 ///
-///  2-argument ceil(value, scale) is not yet implemented
-/// https://github.com/apache/datafusion/issues/21560
+/// 2-argument ceil(value, scale) is not yet implemented
+/// <https://github.com/apache/datafusion/issues/21560>
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SparkCeil {
     signature: Signature,
