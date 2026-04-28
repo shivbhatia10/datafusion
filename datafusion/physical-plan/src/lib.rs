@@ -93,6 +93,7 @@ pub mod stream;
 pub mod streaming;
 pub mod tree_node;
 pub mod union;
+pub mod union_check;
 pub mod unnest;
 pub mod windows;
 pub mod work_table;
