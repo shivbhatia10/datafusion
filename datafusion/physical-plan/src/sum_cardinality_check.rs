@@ -15,26 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! Post-execution union cardinality validation.
+//! Post-execution sum-cardinality validation.
 //!
-//! Provides [`validate_union_cardinality`] which walks an executed plan tree
-//! and verifies that every [`UnionExec`] node produced exactly the sum of its
-//! inputs' output rows.
+//! Provides [`validate_sum_cardinality`] which walks an executed plan tree and
+//! verifies that every concat-style operator ([`UnionExec`], [`InterleaveExec`])
+//! produced exactly the sum of its inputs' output rows.
 
 use crate::ExecutionPlan;
-use crate::union::UnionExec;
+use crate::union::{InterleaveExec, UnionExec};
 use crate::visitor::{ExecutionPlanVisitor, visit_execution_plan};
 use datafusion_common::{DataFusionError, Result};
 
-/// Visitor that checks union cardinality invariants after execution.
-struct UnionCheckVisitor;
+/// Visitor that checks sum-cardinality invariants after execution.
+struct SumCardinalityVisitor;
 
-impl ExecutionPlanVisitor for UnionCheckVisitor {
+impl ExecutionPlanVisitor for SumCardinalityVisitor {
     type Error = DataFusionError;
 
     fn pre_visit(&mut self, plan: &dyn ExecutionPlan) -> Result<bool, DataFusionError> {
-        if plan.is::<UnionExec>() {
-            check_union_row_count(plan)?;
+        if plan.is::<UnionExec>() || plan.is::<InterleaveExec>() {
+            check_sum_cardinality(plan)?;
         }
         Ok(true)
     }
@@ -43,8 +43,8 @@ impl ExecutionPlanVisitor for UnionCheckVisitor {
 /// Compare a node's recorded output row count against the sum of its children's
 /// output row counts. Silently skips when metrics are unavailable on the node
 /// or any of its children.
-fn check_union_row_count(union: &dyn ExecutionPlan) -> Result<()> {
-    let Some(parent_metrics) = union.metrics() else {
+fn check_sum_cardinality(plan: &dyn ExecutionPlan) -> Result<()> {
+    let Some(parent_metrics) = plan.metrics() else {
         return Ok(());
     };
     let Some(parent_rows) = parent_metrics.output_rows() else {
@@ -52,7 +52,7 @@ fn check_union_row_count(union: &dyn ExecutionPlan) -> Result<()> {
     };
 
     let mut child_total: usize = 0;
-    for child in union.children() {
+    for child in plan.children() {
         let Some(child_metrics) = child.metrics() else {
             return Ok(());
         };
@@ -64,27 +64,27 @@ fn check_union_row_count(union: &dyn ExecutionPlan) -> Result<()> {
 
     if parent_rows != child_total {
         return Err(DataFusionError::Internal(format!(
-            "UnionExec cardinality violation in {}: \
+            "Sum cardinality violation in {}: \
              operator produced {parent_rows} output rows \
              but the sum of its inputs produced {child_total} rows",
-            union.name(),
+            plan.name(),
         )));
     }
 
     Ok(())
 }
 
-/// Walk the execution plan tree and verify that every [`UnionExec`] node
-/// produced exactly as many output rows as the sum of its children's output
-/// rows, based on post-execution metrics.
+/// Walk the execution plan tree and verify that every concat-style operator
+/// ([`UnionExec`], [`InterleaveExec`]) produced exactly as many output rows as
+/// the sum of its children's output rows, based on post-execution metrics.
 ///
 /// Nodes are silently skipped when:
-/// - They are not a [`UnionExec`]
+/// - They are not a [`UnionExec`] or [`InterleaveExec`]
 /// - Metrics are unavailable on the node or any of its children
 ///
 /// Returns `Err(DataFusionError::Internal)` on the first violation found.
-pub fn validate_union_cardinality(plan: &dyn ExecutionPlan) -> Result<()> {
-    let mut visitor = UnionCheckVisitor;
+pub fn validate_sum_cardinality(plan: &dyn ExecutionPlan) -> Result<()> {
+    let mut visitor = SumCardinalityVisitor;
     visit_execution_plan(plan, &mut visitor)
 }
 
@@ -207,7 +207,7 @@ mod tests {
             Arc::new(MockExec::new("b", vec![], Some(40)));
         let parent = MockExec::new("union_like", vec![child_a, child_b], Some(100));
 
-        assert!(check_union_row_count(&parent).is_ok());
+        assert!(check_sum_cardinality(&parent).is_ok());
     }
 
     #[test]
@@ -219,10 +219,10 @@ mod tests {
             Arc::new(MockExec::new("b", vec![], Some(40)));
         let parent = MockExec::new("BadUnion", vec![child_a, child_b], Some(90));
 
-        let err = check_union_row_count(&parent).unwrap_err();
+        let err = check_sum_cardinality(&parent).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("UnionExec cardinality violation"),
+            msg.contains("Sum cardinality violation"),
             "unexpected error: {msg}"
         );
         assert!(msg.contains("BadUnion"), "unexpected error: {msg}");
@@ -239,7 +239,7 @@ mod tests {
             Arc::new(MockExec::new("b", vec![], Some(40)));
         let parent = MockExec::new("no_metrics", vec![child_a, child_b], None);
 
-        assert!(check_union_row_count(&parent).is_ok());
+        assert!(check_sum_cardinality(&parent).is_ok());
     }
 
     #[test]
@@ -250,13 +250,13 @@ mod tests {
         let child_b: Arc<dyn ExecutionPlan> = Arc::new(MockExec::new("b", vec![], None));
         let parent = MockExec::new("partial_metrics", vec![child_a, child_b], Some(100));
 
-        assert!(check_union_row_count(&parent).is_ok());
+        assert!(check_sum_cardinality(&parent).is_ok());
     }
 
     #[test]
-    fn test_visitor_skips_non_union_nodes() {
+    fn test_visitor_skips_unrelated_nodes() {
         // Even when child counts don't sum to the parent, the visitor should
-        // ignore non-UnionExec nodes entirely.
+        // ignore nodes that are neither UnionExec nor InterleaveExec.
         let child_a: Arc<dyn ExecutionPlan> =
             Arc::new(MockExec::new("a", vec![], Some(60)));
         let child_b: Arc<dyn ExecutionPlan> =
@@ -267,7 +267,7 @@ mod tests {
             Some(7),
         ));
 
-        assert!(validate_union_cardinality(parent.as_ref()).is_ok());
+        assert!(validate_sum_cardinality(parent.as_ref()).is_ok());
     }
 
     #[test]
@@ -278,6 +278,6 @@ mod tests {
         let child_b: Arc<dyn ExecutionPlan> = Arc::new(MockExec::new("b", vec![], None));
         let union = UnionExec::try_new(vec![child_a, child_b]).unwrap();
 
-        assert!(validate_union_cardinality(union.as_ref()).is_ok());
+        assert!(validate_sum_cardinality(union.as_ref()).is_ok());
     }
 }

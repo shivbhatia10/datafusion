@@ -1298,16 +1298,16 @@ pub async fn collect(
     plan: Arc<dyn ExecutionPlan>,
     context: Arc<TaskContext>,
 ) -> Result<Vec<RecordBatch>> {
-    let verify_union = context
+    let verify_sum = context
         .session_config()
         .options()
         .execution
-        .verify_union_cardinality;
-    let plan_clone = verify_union.then(|| Arc::clone(&plan));
+        .verify_sum_cardinality;
+    let plan_clone = verify_sum.then(|| Arc::clone(&plan));
     let stream = execute_stream(plan, context)?;
     let result = crate::common::collect(stream).await?;
     if let Some(plan) = plan_clone {
-        crate::union_check::validate_union_cardinality(plan.as_ref())?;
+        crate::sum_cardinality_check::validate_sum_cardinality(plan.as_ref())?;
     }
     Ok(result)
 }
@@ -1346,12 +1346,12 @@ pub async fn collect_partitioned(
     plan: Arc<dyn ExecutionPlan>,
     context: Arc<TaskContext>,
 ) -> Result<Vec<Vec<RecordBatch>>> {
-    let verify_union = context
+    let verify_sum = context
         .session_config()
         .options()
         .execution
-        .verify_union_cardinality;
-    let plan_clone = verify_union.then(|| Arc::clone(&plan));
+        .verify_sum_cardinality;
+    let plan_clone = verify_sum.then(|| Arc::clone(&plan));
     let streams = execute_stream_partitioned(plan, context)?;
 
     let mut join_set = JoinSet::new();
@@ -1385,7 +1385,7 @@ pub async fn collect_partitioned(
     let batches = batches.into_iter().map(|(_, batch)| batch).collect();
 
     if let Some(plan) = plan_clone {
-        crate::union_check::validate_union_cardinality(plan.as_ref())?;
+        crate::sum_cardinality_check::validate_sum_cardinality(plan.as_ref())?;
     }
 
     Ok(batches)
