@@ -18,13 +18,13 @@
 //! Post-execution sum-cardinality validation.
 //!
 //! Provides [`validate_sum_cardinality`] which walks an executed plan tree and
-//! verifies that every concat-style operator ([`UnionExec`], [`InterleaveExec`])
-//! produced exactly the sum of its inputs' output rows.
+//! verifies that every [`UnionExec`] / [`InterleaveExec`] produced exactly the
+//! sum of its inputs' output rows.
 
 use crate::ExecutionPlan;
 use crate::union::{InterleaveExec, UnionExec};
 use crate::visitor::{ExecutionPlanVisitor, visit_execution_plan};
-use datafusion_common::{DataFusionError, Result};
+use datafusion_common::{DataFusionError, Result, assert_eq_or_internal_err};
 
 /// Visitor that checks sum-cardinality invariants after execution.
 struct SumCardinalityVisitor;
@@ -59,24 +59,22 @@ fn check_sum_cardinality(plan: &dyn ExecutionPlan) -> Result<()> {
         let Some(child_rows) = child_metrics.output_rows() else {
             return Ok(());
         };
-        child_total += child_rows;
+        child_total = child_total.saturating_add(child_rows);
     }
 
-    if parent_rows != child_total {
-        return Err(DataFusionError::Internal(format!(
-            "Sum cardinality violation in {}: \
-             operator produced {parent_rows} output rows \
-             but the sum of its inputs produced {child_total} rows",
-            plan.name(),
-        )));
-    }
+    assert_eq_or_internal_err!(
+        parent_rows,
+        child_total,
+        "Sum cardinality violation in {}",
+        plan.name()
+    );
 
     Ok(())
 }
 
-/// Walk the execution plan tree and verify that every concat-style operator
-/// ([`UnionExec`], [`InterleaveExec`]) produced exactly as many output rows as
-/// the sum of its children's output rows, based on post-execution metrics.
+/// Walk the execution plan tree and verify that every [`UnionExec`] /
+/// [`InterleaveExec`] produced exactly as many output rows as the sum of its
+/// children's output rows, based on post-execution metrics.
 ///
 /// Nodes are silently skipped when:
 /// - They are not a [`UnionExec`] or [`InterleaveExec`]
@@ -200,7 +198,6 @@ mod tests {
 
     #[test]
     fn test_check_passes_when_sum_matches() {
-        // Parent produced 100 rows; children produced 60 + 40
         let child_a: Arc<dyn ExecutionPlan> =
             Arc::new(MockExec::new("a", vec![], Some(60)));
         let child_b: Arc<dyn ExecutionPlan> =
@@ -212,7 +209,6 @@ mod tests {
 
     #[test]
     fn test_check_violation_when_sum_mismatched() {
-        // Parent produced 90 rows but children sum to 100
         let child_a: Arc<dyn ExecutionPlan> =
             Arc::new(MockExec::new("a", vec![], Some(60)));
         let child_b: Arc<dyn ExecutionPlan> =

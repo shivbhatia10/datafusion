@@ -1298,17 +1298,10 @@ pub async fn collect(
     plan: Arc<dyn ExecutionPlan>,
     context: Arc<TaskContext>,
 ) -> Result<Vec<RecordBatch>> {
-    let verify_sum = context
-        .session_config()
-        .options()
-        .execution
-        .verify_sum_cardinality;
-    let plan_clone = verify_sum.then(|| Arc::clone(&plan));
+    let plan_for_validation = plan_for_post_collect_validation(&plan, &context);
     let stream = execute_stream(plan, context)?;
     let result = crate::common::collect(stream).await?;
-    if let Some(plan) = plan_clone {
-        crate::sum_cardinality_check::validate_sum_cardinality(plan.as_ref())?;
-    }
+    run_post_collect_validations(plan_for_validation.as_ref())?;
     Ok(result)
 }
 
@@ -1346,12 +1339,7 @@ pub async fn collect_partitioned(
     plan: Arc<dyn ExecutionPlan>,
     context: Arc<TaskContext>,
 ) -> Result<Vec<Vec<RecordBatch>>> {
-    let verify_sum = context
-        .session_config()
-        .options()
-        .execution
-        .verify_sum_cardinality;
-    let plan_clone = verify_sum.then(|| Arc::clone(&plan));
+    let plan_for_validation = plan_for_post_collect_validation(&plan, &context);
     let streams = execute_stream_partitioned(plan, context)?;
 
     let mut join_set = JoinSet::new();
@@ -1384,11 +1372,29 @@ pub async fn collect_partitioned(
     batches.sort_by_key(|(idx, _)| *idx);
     let batches = batches.into_iter().map(|(_, batch)| batch).collect();
 
-    if let Some(plan) = plan_clone {
-        crate::sum_cardinality_check::validate_sum_cardinality(plan.as_ref())?;
-    }
+    run_post_collect_validations(plan_for_validation.as_ref())?;
 
     Ok(batches)
+}
+
+/// Returns a clone of `plan` if any post-collect validation is enabled in the
+/// session config. Validators run only on `collect()` / `collect_partitioned()`
+/// (not on streaming paths) and are gated behind individual config flags.
+fn plan_for_post_collect_validation(
+    plan: &Arc<dyn ExecutionPlan>,
+    context: &TaskContext,
+) -> Option<Arc<dyn ExecutionPlan>> {
+    let opts = &context.session_config().options().execution;
+    opts.verify_sum_cardinality.then(|| Arc::clone(plan))
+}
+
+/// Runs the post-collect validators that match flags enabled in the session
+/// config. Called after `collect()` / `collect_partitioned()` complete.
+fn run_post_collect_validations(plan: Option<&Arc<dyn ExecutionPlan>>) -> Result<()> {
+    if let Some(plan) = plan {
+        crate::sum_cardinality_check::validate_sum_cardinality(plan.as_ref())?;
+    }
+    Ok(())
 }
 
 /// Execute the [ExecutionPlan] and return a vec with one stream per output
