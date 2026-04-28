@@ -1602,6 +1602,10 @@ pub enum CardinalityEffect {
     LowerEqual,
     /// The operator may produce more output rows than it receives input rows
     GreaterEqual,
+    /// The operator concatenates rows from multiple inputs and produces
+    /// exactly the sum of its inputs' output rows (e.g. `UnionExec`,
+    /// `InterleaveExec`).
+    Sum,
 }
 
 /// Can be used in contexts where properties have not yet been initialized properly.

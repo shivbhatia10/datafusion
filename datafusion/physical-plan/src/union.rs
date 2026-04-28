@@ -363,9 +363,7 @@ impl ExecutionPlan for UnionExec {
     }
 
     fn cardinality_effect(&self) -> CardinalityEffect {
-        // Union combines rows from multiple inputs, so output rows are not tied
-        // to any single input and can only be constrained as greater-or-equal.
-        CardinalityEffect::GreaterEqual
+        CardinalityEffect::Sum
     }
 
     fn supports_limit_pushdown(&self) -> bool {
@@ -688,6 +686,10 @@ impl ExecutionPlan for InterleaveExec {
 
     fn benefits_from_input_partitioning(&self) -> Vec<bool> {
         vec![false; self.children().len()]
+    }
+
+    fn cardinality_effect(&self) -> CardinalityEffect {
+        CardinalityEffect::Sum
     }
 }
 
@@ -1446,10 +1448,7 @@ mod tests {
             .downcast_ref::<UnionExec>()
             .expect("expected UnionExec for multiple inputs");
 
-        assert!(matches!(
-            union.cardinality_effect(),
-            CardinalityEffect::GreaterEqual
-        ));
+        assert!(matches!(union.cardinality_effect(), CardinalityEffect::Sum));
         Ok(())
     }
 }

@@ -18,11 +18,11 @@
 //! Post-execution sum-cardinality validation.
 //!
 //! Provides [`validate_sum_cardinality`] which walks an executed plan tree and
-//! verifies that every [`UnionExec`] / [`InterleaveExec`] produced exactly the
-//! sum of its inputs' output rows.
+//! verifies that every operator declaring [`CardinalityEffect::Sum`] produced
+//! exactly the sum of its inputs' output rows.
 
 use crate::ExecutionPlan;
-use crate::union::{InterleaveExec, UnionExec};
+use crate::execution_plan::CardinalityEffect;
 use crate::visitor::{ExecutionPlanVisitor, visit_execution_plan};
 use datafusion_common::{DataFusionError, Result, assert_eq_or_internal_err};
 
@@ -33,7 +33,7 @@ impl ExecutionPlanVisitor for SumCardinalityVisitor {
     type Error = DataFusionError;
 
     fn pre_visit(&mut self, plan: &dyn ExecutionPlan) -> Result<bool, DataFusionError> {
-        if plan.is::<UnionExec>() || plan.is::<InterleaveExec>() {
+        if matches!(plan.cardinality_effect(), CardinalityEffect::Sum) {
             check_sum_cardinality(plan)?;
         }
         Ok(true)
@@ -72,12 +72,12 @@ fn check_sum_cardinality(plan: &dyn ExecutionPlan) -> Result<()> {
     Ok(())
 }
 
-/// Walk the execution plan tree and verify that every [`UnionExec`] /
-/// [`InterleaveExec`] produced exactly as many output rows as the sum of its
-/// children's output rows, based on post-execution metrics.
+/// Walk the execution plan tree and verify that every operator declaring
+/// [`CardinalityEffect::Sum`] produced exactly as many output rows as the sum
+/// of its children's output rows, based on post-execution metrics.
 ///
 /// Nodes are silently skipped when:
-/// - They are not a [`UnionExec`] or [`InterleaveExec`]
+/// - They do not declare `CardinalityEffect::Sum`
 /// - Metrics are unavailable on the node or any of its children
 ///
 /// Returns `Err(DataFusionError::Internal)` on the first violation found.
@@ -91,6 +91,7 @@ mod tests {
     use super::*;
     use crate::execution_plan::{Boundedness, EmissionType};
     use crate::metrics::{ExecutionPlanMetricsSet, MetricBuilder};
+    use crate::union::UnionExec;
     use crate::{DisplayAs, DisplayFormatType, PlanProperties};
     use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
     use datafusion_common::Result;
