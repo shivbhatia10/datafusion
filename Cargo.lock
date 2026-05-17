@@ -2296,6 +2296,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "datafusion-gpu"
+version = "53.1.0"
+dependencies = [
+ "arrow",
+ "datafusion-common",
+ "datafusion-execution",
+ "datafusion-physical-expr",
+ "datafusion-physical-optimizer",
+ "datafusion-physical-plan",
+ "futures",
+ "tokio",
+]
+
+[[package]]
 name = "datafusion-macros"
 version = "53.1.0"
 dependencies = [
